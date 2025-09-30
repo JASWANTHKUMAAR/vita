@@ -6,6 +6,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
 import shap
+import plotly.express as px
 
 # Dummy POWERGRID project data
 data = pd.DataFrame({
@@ -36,9 +37,6 @@ rf_cost.fit(X_train, y_cost_train)
 xgb_time = xgb.XGBRegressor(n_estimators=200, learning_rate=0.05, random_state=42)
 xgb_time.fit(X_train, y_time_train)
 
-cost_preds = rf_cost.predict(X_test)
-timeline_preds = xgb_time.predict(X_test)
-
 def format_cost(cost):
     if cost >= 1e7:
         return f"{cost / 1e7:.2f} Cr"
@@ -59,13 +57,15 @@ def predict_project(new_data_dict):
     time_pred = xgb_time.predict(df)[0]
     return cost_pred, time_pred
 
-st.title("Improved POWERGRID Cost & Timeline Prediction")
+st.title("POWERGRID Project Prediction with Interactive Inputs")
 
-pt_substation = st.number_input("Project Type - Substation (1 or 0)", 0, 1, 0)
-pt_overhead = st.number_input("Project Type - Overhead Line (1 or 0)", 0, 1, 0)
-pt_underground = st.number_input("Project Type - Underground Cable (1 or 0)", 0, 1, 0)
-terrain_plain = st.number_input("Terrain - Plain (1 or 0)", 0, 1, 0)
-terrain_hilly = st.number_input("Terrain - Hilly (1 or 0)", 0, 1, 0)
+# Dropdown selections with mapping to one-hot
+project_type = st.selectbox("Select Project Type", ["Substation", "Overhead Line", "Underground Cable"])
+project_type_map = {"Substation": [1, 0, 0], "Overhead Line": [0, 1, 0], "Underground Cable": [0, 0, 1]}
+
+terrain = st.selectbox("Select Terrain", ["Plain", "Hilly"])
+terrain_map = {"Plain": [1, 0], "Hilly": [0, 1]}
+
 rainy_days = st.number_input("Weather - Rainy Days", 0)
 vendor_score = st.number_input("Vendor Performance Score (0 to 10)", 0.0, 10.0, 5.0)
 regulatory_delays = st.number_input("Regulatory Delays (Days)", 0)
@@ -73,21 +73,22 @@ material_cost = st.number_input("Material Cost (in INR)", 0)
 labour_cost = st.number_input("Labour Cost (in INR)", 0)
 
 if st.button("Predict"):
-    proj = {
-        'project_type_substation': pt_substation,
-        'project_type_overhead_line': pt_overhead,
-        'project_type_underground_cable': pt_underground,
-        'terrain_plain': terrain_plain,
-        'terrain_hilly': terrain_hilly,
+    input_data = {
+        'project_type_substation': project_type_map[project_type][0],
+        'project_type_overhead_line': project_type_map[project_type][1],
+        'project_type_underground_cable': project_type_map[project_type][2],
+        'terrain_plain': terrain_map[terrain][0],
+        'terrain_hilly': terrain_map[terrain][1],
         'weather_rainy_days': rainy_days,
         'vendor_performance_score': vendor_score,
         'regulatory_delays_days': regulatory_delays,
         'material_cost': material_cost,
         'labour_cost': labour_cost
     }
-    cost, timeline = predict_project(proj)
-    st.success(f"Predicted Cost: {format_cost(cost)}")
-    st.success(f"Predicted Timeline: {format_timeline(timeline)}")
+
+    cost_pred, timeline_pred = predict_project(input_data)
+    st.success(f"Predicted Cost: {format_cost(cost_pred)}")
+    st.success(f"Predicted Timeline: {format_timeline(timeline_pred)}")
 
     explainer = shap.Explainer(xgb_time)
     shap_values = explainer(X_test)
@@ -99,8 +100,21 @@ if st.button("Predict"):
     }).sort_values('importance', ascending=False)
 
     feature_importance['relative_importance'] = feature_importance['importance'] / feature_importance['importance'].sum()
-    timeline_mae = mean_absolute_error(y_time_test, timeline_preds)
+    timeline_mae = mean_absolute_error(y_time_test, xgb_time.predict(X_test))
     feature_importance['estimated_days_delay'] = feature_importance['relative_importance'] * timeline_mae
 
     st.subheader("Top Hotspot Factors with Estimated Delay (Days)")
-    st.table(feature_importance[['feature', 'estimated_days_delay']])
+
+    # Interactive bar chart of feature importance
+    import plotly.express as px
+    fig = px.bar(
+        feature_importance,
+        x='feature',
+        y='importance',
+        title='Feature Importance for Timeline Prediction',
+        labels={'importance': 'Importance', 'feature': 'Feature'},
+        hover_data=['estimated_days_delay']
+    )
+    st.plotly_chart(fig)
+
+
