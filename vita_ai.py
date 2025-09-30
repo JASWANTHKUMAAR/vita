@@ -8,7 +8,7 @@ from sklearn.metrics import mean_absolute_error
 import shap
 import plotly.express as px
 
-# Dummy POWERGRID project data
+# Dummy project data
 data = pd.DataFrame({
     'project_type_substation':        [1, 0, 0, 1, 0, 0, 1, 0],
     'project_type_overhead_line':     [0, 1, 1, 0, 1, 1, 0, 0],
@@ -57,26 +57,30 @@ def predict_project(new_data_dict):
     time_pred = xgb_time.predict(df)[0]
     return cost_pred, time_pred
 
-st.title("POWERGRID Project Prediction with Interactive Inputs")
+st.title("POWERGRID Project Prediction - Enhanced UI")
 
-# Dropdown selections with mapping to one-hot
-project_type = st.selectbox("Select Project Type", ["Substation", "Overhead Line", "Underground Cable"])
-project_type_map = {"Substation": [1, 0, 0], "Overhead Line": [0, 1, 0], "Underground Cable": [0, 0, 1]}
+# Sidebar input section
+st.sidebar.header("Project Configuration")
 
-terrain = st.selectbox("Select Terrain", ["Plain", "Hilly"])
+project_type = st.sidebar.selectbox("Project Type", ["Substation", "Overhead Line", "Underground Cable"])
+terrain = st.sidebar.selectbox("Terrain Type", ["Plain", "Hilly"])
+rainy_days = st.sidebar.number_input("Rainy Days", 0)
+vendor_score = st.sidebar.number_input("Vendor Performance Score (0-10)", 0.0,10.0, 5.0)
+regulatory_delays = st.sidebar.number_input("Regulatory Delays (Days)", 0)
+
+with st.sidebar.expander("Cost Parameters"):
+    material_cost = st.number_input("Material Cost (INR)", 0)
+    labour_cost = st.number_input("Labour Cost (INR)", 0)
+
+# Encode categorical selections to one-hot
+project_map = {"Substation": [1, 0, 0], "Overhead Line": [0, 1, 0], "Underground Cable": [0, 0, 1]}
 terrain_map = {"Plain": [1, 0], "Hilly": [0, 1]}
 
-rainy_days = st.number_input("Weather - Rainy Days", 0)
-vendor_score = st.number_input("Vendor Performance Score (0 to 10)", 0.0, 10.0, 5.0)
-regulatory_delays = st.number_input("Regulatory Delays (Days)", 0)
-material_cost = st.number_input("Material Cost (in INR)", 0)
-labour_cost = st.number_input("Labour Cost (in INR)", 0)
-
-if st.button("Predict"):
+if st.sidebar.button("Predict"):
     input_data = {
-        'project_type_substation': project_type_map[project_type][0],
-        'project_type_overhead_line': project_type_map[project_type][1],
-        'project_type_underground_cable': project_type_map[project_type][2],
+        'project_type_substation': project_map[project_type][0],
+        'project_type_overhead_line': project_map[project_type][1],
+        'project_type_underground_cable': project_map[project_type][2],
         'terrain_plain': terrain_map[terrain][0],
         'terrain_hilly': terrain_map[terrain][1],
         'weather_rainy_days': rainy_days,
@@ -87,6 +91,7 @@ if st.button("Predict"):
     }
 
     cost_pred, timeline_pred = predict_project(input_data)
+
     st.success(f"Predicted Cost: {format_cost(cost_pred)}")
     st.success(f"Predicted Timeline: {format_timeline(timeline_pred)}")
 
@@ -95,26 +100,23 @@ if st.button("Predict"):
 
     importance_vals = np.abs(shap_values.values).mean(0)
     feature_importance = pd.DataFrame({
-        'feature': features.columns,
-        'importance': importance_vals
-    }).sort_values('importance', ascending=False)
+        'Feature': features.columns,
+        'Importance': importance_vals
+    }).sort_values('Importance', ascending=False)
 
-    feature_importance['relative_importance'] = feature_importance['importance'] / feature_importance['importance'].sum()
+    feature_importance['Relative Importance'] = feature_importance['Importance'] / feature_importance['Importance'].sum()
     timeline_mae = mean_absolute_error(y_time_test, xgb_time.predict(X_test))
-    feature_importance['estimated_days_delay'] = feature_importance['relative_importance'] * timeline_mae
+    feature_importance['Estimated Delay (Days)'] = feature_importance['Relative Importance'] * timeline_mae
 
-    st.subheader("Top Hotspot Factors with Estimated Delay (Days)")
+    st.subheader("Top Hotspot Factors Impacting Timeline")
 
-    # Interactive bar chart of feature importance
-    import plotly.express as px
     fig = px.bar(
         feature_importance,
-        x='feature',
-        y='importance',
+        x='Feature',
+        y='Importance',
+        hover_data=['Estimated Delay (Days)'],
         title='Feature Importance for Timeline Prediction',
-        labels={'importance': 'Importance', 'feature': 'Feature'},
-        hover_data=['estimated_days_delay']
+        labels={'Importance': 'Importance', 'Feature': 'Feature'}
     )
-    st.plotly_chart(fig)
-
+    st.plotly_chart(fig, use_container_width=True)
 
