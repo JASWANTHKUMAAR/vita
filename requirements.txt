@@ -4,3 +4,4 @@ shap
 pandas
 scikit-learn
 numpy
+plotly
