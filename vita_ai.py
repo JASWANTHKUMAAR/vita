@@ -15,7 +15,7 @@ data = pd.DataFrame({
     'project_type_underground_cable':[0, 0, 0, 0, 0, 0, 0, 1],
     'terrain_plain':                  [1, 1, 0, 1, 0, 0, 1, 1],
     'terrain_hilly':                  [0, 0, 1, 0, 1, 1, 0, 0],
-    'weather_rainy_days':             [5, 2, 10, 1, 8, 7, 0, 4],
+    'weather_rainy_days':             [1, 0, 1, 0, 1, 1, 0, 1], # Changed to binary Yes=1, No=0
     'vendor_performance_score':       [8.5, 7.1, 6.2, 9.0, 7.5, 6.5, 8.0, 7.9],
     'regulatory_delays_days':         [2, 3, 5, 1, 4, 6, 0, 2],
     'material_cost':                  [1200000, 1300000, 1250000, 1150000, 1400000, 1350000, 1100000, 1200000],
@@ -50,6 +50,14 @@ def format_cost(cost):
 def format_timeline(days):
     return f"{days:.1f} days"
 
+def format_inr(num):
+    if num >= 1e7:
+        return f"{num/1e7:,.2f} Cr"
+    elif num >= 1e5:
+        return f"{num/1e5:,.2f} L"
+    else:
+        return f"{int(num):,}"
+
 def predict_project(new_data_dict):
     df = pd.DataFrame([new_data_dict])
     df = df.reindex(columns=features.columns, fill_value=0)
@@ -57,22 +65,26 @@ def predict_project(new_data_dict):
     time_pred = xgb_time.predict(df)[0]
     return cost_pred, time_pred
 
-st.title("POWERGRID Project Prediction - Enhanced UI")
 
-# Sidebar input section
-st.sidebar.header("Project Configuration")
+st.title("POWERGRID Project Prediction with Fully MCQ Inputs")
 
+st.sidebar.header("Project Input Parameters")
+
+# MCQ and binary dropdowns
 project_type = st.sidebar.selectbox("Project Type", ["Substation", "Overhead Line", "Underground Cable"])
-terrain = st.sidebar.selectbox("Terrain Type", ["Plain", "Hilly"])
-rainy_days = st.sidebar.number_input("Rainy Days", 0)
-vendor_score = st.sidebar.number_input("Vendor Performance Score (0-10)", 0.0,10.0, 5.0)
+terrain = st.sidebar.selectbox("Terrain", ["Plain", "Hilly"])
+rainy_days_input = st.sidebar.selectbox("Were there rainy days?", ["No", "Yes"])
+rainy_days = 1 if rainy_days_input == "Yes" else 0
+vendor_score = st.sidebar.number_input("Vendor Performance Score (0 to 10)", 0.0, 10.0, 5.0)
 regulatory_delays = st.sidebar.number_input("Regulatory Delays (Days)", 0)
 
-with st.sidebar.expander("Cost Parameters"):
-    material_cost = st.number_input("Material Cost (INR)", 0)
-    labour_cost = st.number_input("Labour Cost (INR)", 0)
+with st.sidebar.expander("Cost Details"):
+    material_cost = st.number_input("Material Cost (enter number only, e.g. 1200000)")
+    st.write("Formatted Material Cost: ", format_inr(material_cost))
+    labour_cost = st.number_input("Labour Cost (enter number only)")
+    st.write("Formatted Labour Cost: ", format_inr(labour_cost))
 
-# Encode categorical selections to one-hot
+# Map MCQs to one-hot encoded vectors
 project_map = {"Substation": [1, 0, 0], "Overhead Line": [0, 1, 0], "Underground Cable": [0, 0, 1]}
 terrain_map = {"Plain": [1, 0], "Hilly": [0, 1]}
 
@@ -92,6 +104,7 @@ if st.sidebar.button("Predict"):
 
     cost_pred, timeline_pred = predict_project(input_data)
 
+    st.write("### Prediction Results")
     st.success(f"Predicted Cost: {format_cost(cost_pred)}")
     st.success(f"Predicted Timeline: {format_timeline(timeline_pred)}")
 
@@ -108,7 +121,7 @@ if st.sidebar.button("Predict"):
     timeline_mae = mean_absolute_error(y_time_test, xgb_time.predict(X_test))
     feature_importance['Estimated Delay (Days)'] = feature_importance['Relative Importance'] * timeline_mae
 
-    st.subheader("Top Hotspot Factors Impacting Timeline")
+    st.subheader("Top Hotspot Factors in Timeline Prediction")
 
     fig = px.bar(
         feature_importance,
@@ -119,4 +132,3 @@ if st.sidebar.button("Predict"):
         labels={'Importance': 'Importance', 'Feature': 'Feature'}
     )
     st.plotly_chart(fig, use_container_width=True)
-
