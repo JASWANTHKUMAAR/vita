@@ -5,13 +5,9 @@ import xgboost as xgb
 import shap
 from sklearn.model_selection import train_test_split
 
-# You must have these packages installed via requirements.txt
-# Do NOT put pip install commands here
-
-# Seed for reproducibility
 np.random.seed(42)
 
-# Generate synthetic dataset
+# Synthetic dataset generation
 def create_synthetic_data(num_projects=100):
     project_types = ['Substation', 'Overhead Cable', 'Underground Cable']
     vendors = ['VendorA', 'VendorB', 'VendorC', 'VendorD']
@@ -43,8 +39,8 @@ def create_synthetic_data(num_projects=100):
 
     return data
 
-# Prepare data and train models once
-@st.cache(allow_output_mutation=True)
+# Training models with caching
+@st.cache_resource
 def train_models():
     data = create_synthetic_data()
 
@@ -55,19 +51,15 @@ def train_models():
                [col for col in data_encoded.columns if 'project_type_' in col or 'vendor_name_' in col]
 
     X = data_encoded[features]
-
     y_cost = data_encoded['cost_overrun']
     y_time = data_encoded['timeline_delay_days']
 
-    # Train cost overrun model
     model_cost = xgb.XGBRegressor(objective='reg:squarederror', random_state=42)
     model_cost.fit(X, y_cost)
 
-    # Train timeline delay model
     model_time = xgb.XGBRegressor(objective='reg:squarederror', random_state=42)
     model_time.fit(X, y_time)
 
-    # SHAP explainers
     explainer_cost = shap.Explainer(model_cost)
     explainer_time = shap.Explainer(model_time)
 
@@ -75,7 +67,7 @@ def train_models():
 
 model_cost, model_time, explainer_cost, explainer_time, features = train_models()
 
-# Predict and explain function
+# Prediction and explanation
 def predict_and_explain(input_df):
     input_encoded = pd.get_dummies(input_df, columns=['project_type', 'vendor_name'], drop_first=True)
     for col in features:
@@ -99,44 +91,61 @@ def risk_color(value, thresholds):
     else:
         return 'red'
 
-# Streamlit UI
-st.title("POWERGRID Project Cost & Timeline Risk Predictor")
-
+# Sidebar inputs
 st.sidebar.header("Input Parameters")
-project_type = st.sidebar.selectbox("Project Type", ["Substation", "Overhead Cable", "Underground Cable"])
-vendor_name = st.sidebar.selectbox("Vendor", ["VendorA", "VendorB", "VendorC", "VendorD"])
-manpower_count = st.sidebar.slider("Manpower Count", 20, 200, 50)
-planned_cost = st.sidebar.number_input("Planned Cost (INR)", 1_000_000, 10_000_000, 5_000_000, 100_000)
-planned_timeline = st.sidebar.slider("Planned Timeline (days)", 30, 365, 180)
-avg_temp = st.sidebar.slider("Average Temperature (°C)", 15.0, 45.0, 25.0)
-rainfall = st.sidebar.slider("Rainfall (mm)", 0.0, 300.0, 100.0)
-commodity_price = st.sidebar.slider("Commodity Price Index", 80.0, 120.0, 100.0)
 
+terrain_type = st.sidebar.selectbox("Type of Terrain", ["Hilly", "Plain"])
+
+expected_timeline = st.sidebar.number_input("Expected Timeline (days)", min_value=1, max_value=1000, value=180)
+
+def format_budget_input():
+    val = st.sidebar.text_input("Total Budget")
+    try:
+        num = float(val.replace(',', '').replace(' ', ''))
+        if num >= 1e7:
+            formatted = f"{num/1e7:.2f} Crore"
+        elif num >= 1e5:
+            formatted = f"{num/1e5:.2f} Lakh"
+        elif num >= 1e3:
+            formatted = f"{num/1e3:.2f} Thousand"
+        else:
+            formatted = f"{num}"
+        st.sidebar.write(f"Entered Budget: {formatted}")
+        return num
+    except:
+        st.sidebar.write("Enter budget as number")
+        return 0
+
+total_budget = format_budget_input()
+
+labour_efficiency = st.sidebar.slider("Labour Efficiency (1-10)", 1, 10, 5)
+
+manpower_count = st.sidebar.number_input("Manpower Count", min_value=1, max_value=10000, value=50)
+
+# Prepare input dataframe for prediction
 input_data = pd.DataFrame({
-    "project_type": [project_type],
-    "vendor_name": [vendor_name],
+    "project_type": [terrain_type],  # Assuming project_type replaced by terrain_type for demo
+    "vendor_name": ["VendorA"],  # Default vendor; can update UI if desired
     "manpower_count": [manpower_count],
-    "planned_cost": [planned_cost],
-    "planned_timeline_days": [planned_timeline],
-    "average_temperature": [avg_temp],
-    "rainfall_mm": [rainfall],
-    "commodity_price_index": [commodity_price]
+    "planned_cost": [total_budget],
+    "planned_timeline_days": [expected_timeline],
+    "average_temperature": [25],  # Placeholder, could add input
+    "rainfall_mm": [100],         # Placeholder, could add input
+    "commodity_price_index": [100] # Placeholder, could add input
 })
 
+# Run prediction and display
 if st.button("Predict Risk"):
-    cost_overrun_pred, timeline_delay_pred, shap_cost, shap_time = predict_and_explain(input_data)
+    cost_pred, time_pred, _, _ = predict_and_explain(input_data)
 
-    st.write(f"### Predicted Cost Overrun: INR {cost_overrun_pred:,.2f}")
-    st.write(f"### Predicted Timeline Delay: {timeline_delay_pred:.1f} days")
+    st.write(f"### Predicted Cost Overrun: INR {cost_pred:,.2f}")
+    st.write(f"### Predicted Timeline Delay: {time_pred:.1f} days")
 
-    cost_thresh = [0, planned_cost * 0.1]
-    time_thresh = [0, planned_timeline * 0.1]
+    cost_thresholds = [0, total_budget * 0.1]
+    time_thresholds = [0, expected_timeline * 0.1]
 
-    cost_color = risk_color(cost_overrun_pred, cost_thresh)
-    time_color = risk_color(timeline_delay_pred, time_thresh)
+    cost_color = risk_color(cost_pred, cost_thresholds)
+    time_color = risk_color(time_pred, time_thresholds)
 
     st.markdown(f"<h3>Cost Overrun Risk: <span style='color:{cost_color}'>●</span></h3>", unsafe_allow_html=True)
     st.markdown(f"<h3>Timeline Delay Risk: <span style='color:{time_color}'>●</span></h3>", unsafe_allow_html=True)
-
-    # Optionally add shap plots here (needs streamlit-shap or custom components)
-
