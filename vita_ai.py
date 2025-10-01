@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import xgboost as xgb
 import shap
+from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split
 
 np.random.seed(42)
 
-# Synthetic dataset generation
 def create_synthetic_data(num_projects=100):
     project_types = ['Substation', 'Overhead Cable', 'Underground Cable']
     vendors = ['VendorA', 'VendorB', 'VendorC', 'VendorD']
@@ -39,7 +39,6 @@ def create_synthetic_data(num_projects=100):
 
     return data
 
-# Training models with caching
 @st.cache_resource
 def train_models():
     data = create_synthetic_data()
@@ -67,7 +66,6 @@ def train_models():
 
 model_cost, model_time, explainer_cost, explainer_time, features = train_models()
 
-# Prediction and explanation
 def predict_and_explain(input_df):
     input_encoded = pd.get_dummies(input_df, columns=['project_type', 'vendor_name'], drop_first=True)
     for col in features:
@@ -91,11 +89,9 @@ def risk_color(value, thresholds):
     else:
         return 'red'
 
-# Sidebar inputs
 st.sidebar.header("Input Parameters")
 
 terrain_type = st.sidebar.selectbox("Type of Terrain", ["Hilly", "Plain"])
-
 expected_timeline = st.sidebar.number_input("Expected Timeline (days)", min_value=1, max_value=1000, value=180)
 
 def format_budget_input():
@@ -117,35 +113,48 @@ def format_budget_input():
         return 0
 
 total_budget = format_budget_input()
-
 labour_efficiency = st.sidebar.slider("Labour Efficiency (1-10)", 1, 10, 5)
-
 manpower_count = st.sidebar.number_input("Manpower Count", min_value=1, max_value=10000, value=50)
 
-# Prepare input dataframe for prediction
+st.sidebar.subheader("Actual Project Data (optional for MAE)")
+actual_timeline = st.sidebar.number_input("Actual Timeline (days)", min_value=0, max_value=2000, value=0)
+actual_cost = st.sidebar.number_input("Actual Cost (INR)", min_value=0, value=0)
+
 input_data = pd.DataFrame({
-    "project_type": [terrain_type],  # Assuming project_type replaced by terrain_type for demo
-    "vendor_name": ["VendorA"],  # Default vendor; can update UI if desired
+    "project_type": [terrain_type],  # substitute terrain for now
+    "vendor_name": ["VendorA"],
     "manpower_count": [manpower_count],
     "planned_cost": [total_budget],
     "planned_timeline_days": [expected_timeline],
-    "average_temperature": [25],  # Placeholder, could add input
-    "rainfall_mm": [100],         # Placeholder, could add input
-    "commodity_price_index": [100] # Placeholder, could add input
+    "average_temperature": [25],
+    "rainfall_mm": [100],
+    "commodity_price_index": [100]
 })
 
-# Run prediction and display
 if st.button("Predict Risk"):
-    cost_pred, time_pred, _, _ = predict_and_explain(input_data)
+    cost_overrun_pred, timeline_delay_pred, _, _ = predict_and_explain(input_data)
+    predicted_total_cost = total_budget + cost_overrun_pred
+    predicted_total_timeline = expected_timeline + timeline_delay_pred
 
-    st.write(f"### Predicted Cost Overrun: INR {cost_pred:,.2f}")
-    st.write(f"### Predicted Timeline Delay: {time_pred:.1f} days")
+    st.write(f"### Predicted Cost Overrun: INR {cost_overrun_pred:,.2f}")
+    st.write(f"### Predicted Timeline Delay: {timeline_delay_pred:.1f} days")
+    st.write(f"### Predicted Total Cost: INR {predicted_total_cost:,.2f}")
+    st.write(f"### Predicted Total Timeline: {predicted_total_timeline:.1f} days")
+
+    if actual_timeline > 0 and actual_cost > 0:
+        mae_timeline = mean_absolute_error([actual_timeline], [predicted_total_timeline])
+        mae_cost = mean_absolute_error([actual_cost], [predicted_total_cost])
+        st.write(f"### Mean Absolute Error - Timeline: {mae_timeline:.2f} days")
+        st.write(f"### Mean Absolute Error - Cost: INR {mae_cost:,.2f}")
+    else:
+        st.write("Actual Timeline and Cost not provided - skipping MAE calculation.")
 
     cost_thresholds = [0, total_budget * 0.1]
     time_thresholds = [0, expected_timeline * 0.1]
 
-    cost_color = risk_color(cost_pred, cost_thresholds)
-    time_color = risk_color(time_pred, time_thresholds)
+    cost_color = risk_color(cost_overrun_pred, cost_thresholds)
+    time_color = risk_color(timeline_delay_pred, time_thresholds)
 
     st.markdown(f"<h3>Cost Overrun Risk: <span style='color:{cost_color}'>●</span></h3>", unsafe_allow_html=True)
     st.markdown(f"<h3>Timeline Delay Risk: <span style='color:{time_color}'>●</span></h3>", unsafe_allow_html=True)
+
